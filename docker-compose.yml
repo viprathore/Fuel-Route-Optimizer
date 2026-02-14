@@ -1,0 +1,19 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - ALLOWED_HOSTS=*
+      - DJANGO_SETTINGS_MODULE=fuel_route_api.settings
+    volumes:
+      # Mount CSV so you can update fuel data without rebuilding
+      - ./fuel_prices_uploaded.csv:/app/fuel_prices_uploaded.csv:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
