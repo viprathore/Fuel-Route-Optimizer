@@ -21,6 +21,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Load environment variables from .env
 load_dotenv(BASE_DIR / ".env")
 
+# Logging: file-based log (do not commit - see .gitignore)
+LOG_DIR = BASE_DIR / "logs"
+LOG_FILE = LOG_DIR / "fuel_route_api.log"
+os.makedirs(LOG_DIR, exist_ok=True)
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
@@ -146,3 +151,44 @@ FUEL_PRICES_CSV = BASE_DIR / "fuel_prices_uploaded.csv"
 # OpenRouteService API (free tier - sign up at https://openrouteservice.org/)
 # Set OPENROUTESERVICE_API_KEY in .env; routing falls back to geodesic if unset or invalid
 OPENROUTESERVICE_API_KEY = os.environ.get("OPENROUTESERVICE_API_KEY", "")
+
+# Logging: file-based, single rotating log
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{asctime} [{levelname}] {name}: {message}",
+            "style": "{",
+        },
+        "simple": {
+            "format": "{asctime} [{levelname}] {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "file": {
+            "level": "INFO",
+            "class": "logging.FileHandler",
+            "filename": str(LOG_FILE),
+            "formatter": "verbose",
+            "encoding": "utf-8",
+        },
+    },
+    "loggers": {
+        "routes": {
+            "handlers": ["file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["file"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+    },
+    "root": {
+        "handlers": ["file"],
+        "level": "INFO",
+    },
+}

@@ -1,11 +1,14 @@
 """
 Routing service using OpenRouteService API
 """
+import logging
 import requests
 from typing import Dict, List, Tuple
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 # Approximate bounding boxes for USA (50 states): continental, Alaska, Hawaii
 USA_BOUNDS = [
@@ -59,17 +62,19 @@ class RoutingService:
                     lon, lat = data["features"][0]["geometry"]["coordinates"]
                     lat, lon = float(lat), float(lon)
                     if not is_in_usa(lat, lon):
+                        logger.warning("Non-USA location geocoded by ORS: %s -> (%s, %s)", location, lat, lon)
                         raise ValueError(
                             "Only USA location can be application this kind of"
                         )
+                    logger.debug("Geocoded %s via OpenRouteService: (%s, %s)", location, lat, lon)
                     return (lat, lon)
 
         except ValueError:
             raise
         except Exception as e:
-            # If OpenRouteService fails, try fallback
+            logger.debug("OpenRouteService geocode failed for %s: %s, trying Nominatim", location, e)
             pass
-        
+
         # Fallback to Nominatim geocoding (no USA suffix so we get actual place)
         try:
             location_query = f"{location}"
@@ -78,15 +83,19 @@ class RoutingService:
             if location_data:
                 lat, lon = location_data.latitude, location_data.longitude
                 if not is_in_usa(lat, lon):
+                    logger.warning("Non-USA location geocoded by Nominatim: %s -> (%s, %s)", location, lat, lon)
                     raise ValueError(
                         "Only USA location can be application this kind of"
                     )
+                logger.info("Geocoded %s via Nominatim: (%s, %s)", location, lat, lon)
                 return (lat, lon)
             else:
+                logger.warning("Could not geocode location: %s", location)
                 raise ValueError(f"Could not geocode location: {location}")
         except ValueError:
             raise
         except Exception as e:
+            logger.exception("Geocoding error for '%s': %s", location, e)
             raise ValueError(f"Geocoding error for '{location}': {str(e)}")
     
     def get_route(self, start_coords: Tuple[float, float], end_coords: Tuple[float, float]) -> Dict:
@@ -121,20 +130,21 @@ class RoutingService:
                 geometry = route['geometry']['coordinates']
                 route_points = [(lat, lon) for lon, lat in geometry]
                 summary = route['properties']['summary']
-
+                distance_miles = summary['distance'] / 1609.34
+                logger.info("Route from OpenRouteService: distance_miles=%.2f", distance_miles)
                 return {
                     "distance_meters": summary['distance'],
-                    "distance_miles": summary['distance'] / 1609.34,
+                    "distance_miles": distance_miles,
                     "duration_seconds": summary['duration'],
                     "route_points": route_points,
                     "geometry": geometry
                 }
             else:
-                # Fallback to simple straight-line calculation if API fails
+                logger.warning("OpenRouteService returned status %s, using fallback route", response.status_code)
                 return self._fallback_route(start_coords, end_coords)
-                
+
         except Exception as e:
-            # Fallback to simple calculation if API is unavailable
+            logger.warning("OpenRouteService route failed: %s, using fallback", e)
             return self._fallback_route(start_coords, end_coords)
     
     def _fallback_route(self, start_coords: Tuple[float, float], end_coords: Tuple[float, float]) -> Dict:
@@ -156,7 +166,8 @@ class RoutingService:
         
         # Estimate duration (assume 60 mph average)
         duration_seconds = (distance_miles / 60) * 3600
-        
+        logger.info("Fallback route (geodesic): distance_miles=%.2f, points=%s", distance_miles, len(route_points))
+
         return {
             'distance_meters': distance_miles * 1609.34,
             'distance_miles': distance_miles,

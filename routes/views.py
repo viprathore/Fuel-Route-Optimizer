@@ -1,6 +1,8 @@
 """
 Views for route planning API
 """
+import logging
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -10,6 +12,8 @@ from django.views.decorators.csrf import csrf_exempt
 from .serializers import RouteRequestSerializer
 from .services.routing_service import RoutingService
 from .services.fuel_optimizer import FuelOptimizer
+
+logger = logging.getLogger(__name__)
 
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -21,18 +25,19 @@ class OptimalRouteView(APIView):
 
     def post(self, request):
         """Handle POST request for route planning"""
-        # Validate input
         serializer = RouteRequestSerializer(data=request.data)
-        
+
         if not serializer.is_valid():
+            logger.warning("Invalid route request: %s", serializer.errors)
             return Response(
                 {'error': 'Invalid input', 'details': serializer.errors},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         start_location = serializer.validated_data['start']
         finish_location = serializer.validated_data['finish']
-        
+        logger.info("Route request: start=%s finish=%s", start_location, finish_location)
+
         try:
             # Initialize services
             routing_service = RoutingService()
@@ -86,14 +91,22 @@ class OptimalRouteView(APIView):
                 'total_fuel_cost': round(fuel_data['total_fuel_cost'], 2),
             }
 
+            logger.info(
+                "Route success: %s -> %s, distance_miles=%s, fuel_stops=%s",
+                start_location, finish_location,
+                response_data["route"]["total_distance_miles"],
+                len(response_data["fuel_stops"]),
+            )
             return Response(response_data, status=status.HTTP_200_OK)
-            
+
         except ValueError as e:
+            logger.warning("Location error for %s / %s: %s", start_location, finish_location, e)
             return Response(
                 {'error': 'Location error', 'details': str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
         except Exception as e:
+            logger.exception("Server error for route %s -> %s: %s", start_location, finish_location, e)
             return Response(
                 {'error': 'Server error', 'details': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -106,6 +119,7 @@ class HealthCheckView(APIView):
 
     def get(self, request):
         """Return API health status"""
+        logger.debug("Health check requested")
         return Response({
             'status': 'healthy',
             'service': 'Fuel Route Optimizer API',

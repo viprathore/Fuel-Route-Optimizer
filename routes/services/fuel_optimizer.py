@@ -3,10 +3,13 @@ Fuel stop optimizer service
 Finds optimal fuel stops along a route based on price and vehicle range
 """
 import csv
+import logging
 from typing import Dict, List, Tuple
 from geopy.distance import geodesic
 from django.conf import settings
 from .us_state_coords import US_STATE_COORDS
+
+logger = logging.getLogger(__name__)
 
 
 class FuelOptimizer:
@@ -36,9 +39,11 @@ class FuelOptimizer:
                         'price': float(row['Retail Price'])
                     })
             self.raw_stations_data = stations
+            logger.info("Loaded %s fuel stations from %s", len(stations), settings.FUEL_PRICES_CSV)
         except Exception as e:
+            logger.exception("Error loading fuel prices from %s: %s", settings.FUEL_PRICES_CSV, e)
             raise Exception(f"Error loading fuel prices: {str(e)}")
-        
+
         return stations
     
     def _get_stations_near_route(self, route_points: List[Tuple[float, float]], max_distance_miles: float = 100) -> List[Dict]:
@@ -84,7 +89,9 @@ class FuelOptimizer:
             if key not in by_key or station['price'] < by_key[key]['price']:
                 by_key[key] = entry
 
-        return list(by_key.values())
+        result = list(by_key.values())
+        logger.info("Stations near route: %s states, %s stations", len(states_near_route), len(result))
+        return result
     
     def find_optimal_fuel_stops(
         self, 
@@ -188,7 +195,10 @@ class FuelOptimizer:
         
         # Calculate total fuel consumption
         total_gallons = total_distance_miles / self.mpg
-        
+        logger.info(
+            "Optimal fuel stops: %s stops, total_cost=%.2f, total_gallons=%.2f",
+            len(fuel_stops), total_fuel_cost, total_gallons
+        )
         return {
             'fuel_stops': fuel_stops,
             'total_fuel_cost': round(total_fuel_cost, 2),
