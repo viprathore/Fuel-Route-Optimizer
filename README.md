@@ -23,38 +23,67 @@ A Django REST API that calculates optimal fuel stops along a route between two U
 
 ## Installation
 
+### Option A: Run locally
+
 1. **Install dependencies**:
-```bash
-pip install -r requirements.txt
-```
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 2. **Configure environment** (optional, for OpenRouteService routing):
-```bash
-cp .env.example .env
-# Edit .env and set OPENROUTESERVICE_API_KEY=your_key
-```
-Without an API key, the app uses fallback geodesic routing.
+   ```bash
+   cp .env.example .env
+   # Edit .env and set OPENROUTESERVICE_API_KEY=your_key
+   ```
+   Without an API key, the app uses fallback geodesic routing.
 
 3. **Run migrations**:
-```bash
-python manage.py migrate
-```
+   ```bash
+   python manage.py migrate
+   ```
 
 4. **Start the development server**:
-```bash
-python manage.py runserver
-```
+   ```bash
+   python manage.py runserver
+   ```
 
-The API will be available at **`http://localhost:8000/api/`**.
+   The API will be available at **`http://localhost:8000/api/`**.
+
+### Option B: Run with Docker
+
+1. **Create environment file** (optional):
+   ```bash
+   cp .env.example .env
+   # Edit .env and set OPENROUTESERVICE_API_KEY=your_key
+   ```
+
+2. **Build and start**:
+   ```bash
+   docker-compose up --build
+   ```
+
+3. **Optional – run migrations** (if you add database models):
+   ```bash
+   docker-compose exec web python manage.py migrate
+   ```
+
+4. **Optional – development server** (auto-reload):
+   ```bash
+   docker-compose run --service-ports web python manage.py runserver 0.0.0.0:8000
+   ```
+
+   Stop with `docker-compose down`. The CSV file is mounted so you can update fuel data without rebuilding.
 
 ## API Endpoints
 
 ### 1. Health Check
-```
+
+```http
 GET /api/health/
 ```
 
-**Response**:
+**Response** (`200 OK`):
+
 ```json
 {
     "status": "healthy",
@@ -64,11 +93,14 @@ GET /api/health/
 ```
 
 ### 2. Optimal Route Planning
-```
+
+```http
 POST /api/route/
+Content-Type: application/json
 ```
 
-**Request Body**:
+**Request body**:
+
 ```json
 {
     "start": "New York, NY",
@@ -76,15 +108,15 @@ POST /api/route/
 }
 ```
 
-**Response**:
+**Response** (`200 OK`):
+
 ```json
 {
     "route": {
         "start_location": "New York, NY",
         "end_location": "Los Angeles, CA",
-        "total_distance_miles": 2789,
-        "estimated_duration_minutes": 2450,
-        "route_polyline": "encoded_polyline_string_for_map"
+        "total_distance_miles": 2789.0,
+        "estimated_duration_minutes": 2450
     },
     "fuel_strategy": {
         "vehicle_range_miles": 500,
@@ -98,22 +130,43 @@ POST /api/route/
             "city": "Columbus, OH",
             "latitude": 39.9612,
             "longitude": -82.9988,
-            "distance_from_start_miles": 470,
+            "distance_from_start_miles": 470.0,
             "fuel_price_per_gallon": 3.15,
-            "fuel_added_gallons": 50,
-            "cost_for_this_stop": 157.50
+            "fuel_added_gallons": 50.0,
+            "cost_for_this_stop": 157.5
         }
     ],
     "total_fuel_cost": 875.35
 }
 ```
 
+**Error – non-USA location** (`400 Bad Request`):
+
+```json
+{
+    "error": "Location error",
+    "details": "Only USA location can be application this kind of"
+}
+```
+
+**Error – invalid input** (`400 Bad Request`):
+
+```json
+{
+    "error": "Invalid input",
+    "details": {"start": ["This field is required."]}
+}
+```
+
 ## Example Usage
 
-### Using cURL
+### cURL
 
 ```bash
-# Simple route
+# Health check
+curl http://localhost:8000/api/health/
+
+# Plan route (Chicago to Denver)
 curl -X POST http://localhost:8000/api/route/ \
   -H "Content-Type: application/json" \
   -d '{"start": "Chicago, IL", "finish": "Denver, CO"}'
@@ -124,23 +177,38 @@ curl -X POST http://localhost:8000/api/route/ \
   -d '{"start": "New York, NY", "finish": "Los Angeles, CA"}'
 ```
 
-### Using Python
+### Python
 
 ```python
 import requests
 
 url = "http://localhost:8000/api/route/"
-data = {
-    "start": "Chicago, IL",
-    "finish": "Denver, CO"
-}
+payload = {"start": "Chicago, IL", "finish": "Denver, CO"}
 
-response = requests.post(url, json=data)
+response = requests.post(url, json=payload)
+response.raise_for_status()
 result = response.json()
 
-print(f"Total distance: {result['route']['total_distance_miles']} miles")
-print(f"Total fuel cost: ${result['total_fuel_cost']}")
-print(f"Number of fuel stops: {len(result['fuel_stops'])}")
+print(f"Distance: {result['route']['total_distance_miles']} miles")
+print(f"Duration: {result['route']['estimated_duration_minutes']} min")
+print(f"Total fuel cost: ${result['total_fuel_cost']:.2f}")
+print(f"Fuel stops: {len(result['fuel_stops'])}")
+for stop in result["fuel_stops"]:
+    print(f"  {stop['stop_number']}. {stop['station_name']} — {stop['city']}")
+```
+
+### Handling errors
+
+```python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/api/route/",
+    json={"start": "Delhi", "finish": "Mumbai"}
+)
+if response.status_code == 400:
+    err = response.json()
+    print(err["error"], err["details"])  # USA-only validation
 ```
 
 
@@ -148,36 +216,27 @@ print(f"Number of fuel stops: {len(result['fuel_stops'])}")
 
 ```
 .
-├── fuel_route_api/          # Django project settings
-│   ├── settings.py          # Configuration
-│   └── urls.py              # Main URL routing
-├── routes/                  # Main application
-│   ├── services/            # Business logic
-│   │   ├── routing_service.py   # Route calculation & geocoding
-│   │   └── fuel_optimizer.py    # Fuel stop optimization (CSV-based)
-│   ├── polyline_utils.py    # Encoded polyline for map display
-│   ├── serializers.py       # Request validation
-│   ├── views.py             # API endpoints
-│   └── urls.py              # App URL routing
-├── fuel_prices_uploaded.csv # Fuel station prices (CSV)
-├── requirements.txt         # Python dependencies
-└── README.md                # This file
+├── fuel_route_api/              # Django project
+│   ├── settings.py              # Project settings
+│   ├── urls.py                  # Root URL routing
+│   └── wsgi.py                  # WSGI entry (Gunicorn)
+├── routes/                      # Route planning app
+│   ├── services/
+│   │   ├── routing_service.py   # Geocoding & routing (OpenRouteService)
+│   │   ├── fuel_optimizer.py    # Fuel stop optimization (CSV)
+│   │   └── us_state_coords.py   # US state centroids
+│   ├── serializers.py          # Request/response validation
+│   ├── views.py                # API views (route, health)
+│   └── urls.py                 # App URL routing
+├── manage.py
+├── fuel_prices_uploaded.csv     # Fuel station data
+├── requirements.txt
+├── .env.example                 # OPENROUTESERVICE_API_KEY
+├── Dockerfile
+├── docker-compose.yml
+└── README.md
 ```
 
-## Future Enhancements
-
-Potential improvements:
-
-1. **Real-time Fuel Prices**: Integration with live fuel price APIs
-2. **Multiple Routes**: Compare different route options
-3. **User Preferences**: Allow custom MPG, range, and price preferences
-4. **Caching**: Cache route calculations for popular routes
-5. **WebSocket Updates**: Real-time route updates
-6. **Database Storage**: Move fuel prices to PostgreSQL/MySQL
-7. **Authentication**: API key authentication for production use
-8. **Rate Limiting**: Prevent API abuse
-9. **Map UI**: Web interface with interactive map
-10. **EV Support**: Add electric vehicle charging station support
 
 ## License
 
