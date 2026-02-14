@@ -54,7 +54,27 @@ class OptimalRouteView(APIView):
                 total_distance_miles=route_data['distance_miles']
             )
             
-            # Step 4: Build response in the required format
+            # Step 4: Calculate actual driving distances for each fuel stop using OpenRouteService
+            for stop in fuel_data['fuel_stops']:
+                loc = stop.get('location', {})
+                station_coords = (loc.get('latitude'), loc.get('longitude'))
+                if station_coords[0] and station_coords[1]:
+                    actual_distance = routing_service.get_driving_distance_to_point(
+                        start_coords, 
+                        station_coords
+                    )
+                    stop['actual_distance_from_start'] = round(actual_distance, 2)
+                    logger.info(
+                        "Station %s: simulated_distance=%.2f, actual_driving_distance=%.2f",
+                        stop.get('station_name'),
+                        stop.get('distance_from_start', 0),
+                        actual_distance
+                    )
+                else:
+                    # Fallback to simulated distance if coords are missing
+                    stop['actual_distance_from_start'] = stop.get('distance_from_start', 0)
+            
+            # Step 5: Build response in the required format
             route_geometry = route_data['geometry']
 
             fuel_stops_formatted = []
@@ -69,7 +89,7 @@ class OptimalRouteView(APIView):
                     'city': city_display,
                     'latitude': loc.get('latitude'),
                     'longitude': loc.get('longitude'),
-                    'distance_from_start_miles': round(stop.get('distance_from_start', 0), 2),
+                    'distance_from_start_miles': stop.get('actual_distance_from_start', round(stop.get('distance_from_start', 0), 2)),
                     'fuel_price_per_gallon': round(stop.get('price_per_gallon', 0), 2),
                     'fuel_added_gallons': round(stop.get('gallons_purchased', 0), 2),
                     'cost_for_this_stop': round(stop.get('cost', 0), 2),

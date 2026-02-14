@@ -7,11 +7,13 @@ A Django REST API that calculates optimal fuel stops along a route between two U
 - **Route Planning**: Get detailed route information between any two US locations
 - **Optimal Fuel Stops**: Automatically calculates the best fuel stops based on:
   - Vehicle range (500 miles maximum)
+  - Real fuel station locations from OpenRouteService POI API
   - Fuel prices from a comprehensive database
   - Cost optimization (selects cheapest stations along route)
+  - Approximately 400-mile intervals between stops
 - **Fuel Cost Calculation**: Calculates total trip cost assuming 10 MPG fuel efficiency
 - **Map Visualization**: Returns encoded route polyline for mapping applications
-- **Fast Performance**: Minimizes external API calls (1 routing API call per request)
+- **Fast Performance**: Optimized API usage (1 routing call + POI lookups at fuel stops)
 
 ## Technical Stack
 
@@ -19,6 +21,8 @@ A Django REST API that calculates optimal fuel stops along a route between two U
 - **API**: Django REST Framework 3.14.0
 - **Routing Service**: OpenRouteService API (with fallback)
 - **Geocoding**: OpenRouteService (Nominatim fallback via Geopy)
+- **Fuel Station Locations**: OpenRouteService POI API (CSV fallback with state centroids)
+- **Fuel Prices**: CSV database with real fuel prices
 - **Distance Calculations**: GeoPy geodesic
 
 ## Installation
@@ -130,7 +134,7 @@ Content-Type: application/json
             "city": "Columbus, OH",
             "latitude": 39.9612,
             "longitude": -82.9988,
-            "distance_from_start_miles": 470.0,
+            "distance_from_start_miles": 400.0,
             "fuel_price_per_gallon": 3.15,
             "fuel_added_gallons": 50.0,
             "cost_for_this_stop": 157.5
@@ -145,7 +149,7 @@ Content-Type: application/json
 ```json
 {
     "error": "Location error",
-    "details": "Only USA location can be application this kind of"
+    "details": "Only locations within the United States are allowed"
 }
 ```
 
@@ -210,6 +214,30 @@ if response.status_code == 400:
     err = response.json()
     print(err["error"], err["details"])  # USA-only validation
 ```
+
+
+## How It Works
+
+### Fuel Station Discovery
+
+The API uses a hybrid approach to find fuel stations:
+
+1. **Real Coordinates (Primary)**: Uses OpenRouteService POI API to find actual fuel stations within 50 miles of each refueling point (~400 mile intervals)
+2. **Price Matching**: Matches real station locations with CSV fuel price data by city/state
+3. **Fallback**: If ORS POI API is unavailable, uses state centroids with CSV prices
+
+This approach provides:
+- Real station coordinates for accurate mapping
+- Actual fuel prices from the CSV database
+- Fast response times (POI lookups only at refuel points, not entire route)
+
+### Optimization Strategy
+
+- Stops approximately every 400 miles (500-mile range with 100-mile safety buffer)
+- Selects cheapest station within 50 miles of each refuel point
+- Fills tank to capacity (50 gallons) at each stop
+- Returns actual fuel station coordinates from OpenRouteService POI database
+- `distance_from_start_miles` shows cumulative distance from trip origin
 
 
 ## Project Structure

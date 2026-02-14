@@ -147,6 +147,46 @@ class RoutingService:
             logger.warning("OpenRouteService route failed: %s, using fallback", e)
             return self._fallback_route(start_coords, end_coords)
     
+    def get_driving_distance_to_point(self, start_coords: Tuple[float, float], point_coords: Tuple[float, float]) -> float:
+        """
+        Calculate actual driving distance from start to a specific point using OpenRouteService
+        Returns distance in miles, falls back to geodesic if API fails
+        """
+        headers = {
+            'Authorization': self.api_key,
+            'Content-Type': 'application/json'
+        }
+        
+        body = {
+            "coordinates": [
+                [start_coords[1], start_coords[0]],  # start: [lon, lat]
+                [point_coords[1], point_coords[0]]    # point: [lon, lat]
+            ]
+        }
+        
+        try:
+            response = requests.post(
+                self.base_url,
+                json=body,
+                headers=headers,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                route = data['features'][0]
+                summary = route['properties']['summary']
+                distance_miles = summary['distance'] / 1609.34
+                logger.debug("Driving distance from OpenRouteService: %.2f miles", distance_miles)
+                return distance_miles
+            else:
+                logger.warning("OpenRouteService distance API returned status %s, using geodesic fallback", response.status_code)
+                return geodesic(start_coords, point_coords).miles
+                
+        except Exception as e:
+            logger.warning("OpenRouteService distance calculation failed: %s, using geodesic fallback", e)
+            return geodesic(start_coords, point_coords).miles
+    
     def _fallback_route(self, start_coords: Tuple[float, float], end_coords: Tuple[float, float]) -> Dict:
         """
         Fallback route calculation using geodesic distance
